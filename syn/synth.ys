@@ -1,0 +1,31 @@
+# Yosys synthesis script for bfs_top.
+# Targets generic technology (no PDK) — reports logic depth and cell count.
+# Run from syn/: yosys synth.ys
+#
+# VERTEX_W=6 and FIFO_DEPTH=16 used here so memories fit as registers.
+# Production instantiation (VERTEX_W=20, FIFO_DEPTH=2048) requires a
+# BRAM memory-macro pass (e.g. memory_bram with a PDK rules file) and
+# is not reported here — only the control-path logic is characterised.
+
+read_verilog -sv ../rtl/vertex_fifo.sv
+read_verilog -sv ../rtl/visited_bitmap.sv
+read_verilog -sv ../rtl/axi4_rd_master.sv
+read_verilog -sv ../rtl/bfs_ctrl.sv
+read_verilog -sv ../rtl/bfs_top.sv
+
+# Override memory dimensions for logic-only characterisation
+hierarchy -top bfs_top -chparam VERTEX_W 6 -chparam FIFO_DEPTH 16
+
+proc
+opt
+fsm
+opt
+memory
+opt
+
+# Synthesise to generic gates
+synth -top bfs_top
+
+# Report
+stat -top bfs_top
+check

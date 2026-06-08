@@ -1,0 +1,4 @@
+sim/bfs_sim
+sim/*.vcd
+syn/*.blif
+syn/*.json
