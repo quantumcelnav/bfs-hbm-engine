@@ -98,10 +98,10 @@ until the scatter loop for the current vertex completes.
 This serialization is not an accidental artifact of the current FSM design — it is
 a consequence of the data dependency chain in BFS:
 
-\begin{equation}
-\mathit{scatter}(v) \to \mathit{enqueue}(\text{neighbors}) \to \mathit{dequeue}(u)
-\to \mathit{fetch\_ptr}(u) \to \cdots
-\end{equation}
+\begin{align*}
+\mathit{scatter}(v) &\to \mathit{enqueue}(\text{neighbors}) \to \mathit{dequeue}(u) \\
+                    &\to \mathit{fetch\_ptr}(u) \to \cdots
+\end{align*}
 
 The hop-$k$ frontier is logically unavailable until hop-$k-1$ is fully expanded.
 This is the same causal constraint that limits pipeline depth in any sequentially

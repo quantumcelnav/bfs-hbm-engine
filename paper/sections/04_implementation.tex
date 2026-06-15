@@ -12,11 +12,11 @@ The module infers a single-port synchronous block RAM with a 2-stage pipeline:
 \textbf{Stage 0} (combinational address decode, registered): On \texttt{op\_valid}
 and \texttt{!busy}, latch the operation type (\texttt{op\_set}), the target vertex
 \texttt{op\_vid}, and the derived word address and bit select:
-\begin{equation}
-\mathit{waddr} = \mathit{op\_vid}[\mathit{VERTEX\_W}-1 : 5], \quad
-\mathit{bsel}  = \mathit{op\_vid}[4:0]
+\begin{align}
+\mathit{waddr} &= \mathit{op\_vid}[\mathit{VERTEX\_W}-1 : 5] \notag \\
+\mathit{bsel}  &= \mathit{op\_vid}[4:0]
 \label{eq:bm_addr}
-\end{equation}
+\end{align}
 Issue the BRAM read for \texttt{waddr} on the same edge.
 
 \textbf{Stage 1} (registered): The BRAM read data arrives. For a check operation,
@@ -82,8 +82,8 @@ Table~\ref{tab:params} lists the top-level parameters of \texttt{bfs\_top}.
 \centering
 \caption{BFS-HBM top-level parameters.}
 \label{tab:params}
-\small
-\begin{tabular}{@{}lll@{}}
+\footnotesize
+\begin{tabular}{@{}ll>{\raggedright\arraybackslash}p{2.6cm}@{}}
 \toprule
 Parameter & Default & Effect \\
 \midrule

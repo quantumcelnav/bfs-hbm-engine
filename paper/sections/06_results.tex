@@ -17,7 +17,8 @@ in CSR format:
 CSR encoding:
 \begin{align*}
 &\mathtt{row\_ptr} = [0,\,2,\,5,\,8,\,10,\,12,\,15,\,18,\,20] \\
-&\mathtt{col\_idx} = [1,4,\; 0,2,5,\; 1,3,6,\; 2,7,\; 0,5,\; 1,4,6,\; 2,5,7,\; 3,6]
+&\mathtt{col\_idx} = [1,4,\; 0,2,5,\; 1,3,6,\; 2,7,\; 0,5, \\
+&\phantom{\mathtt{col\_idx} = [}1,4,6,\; 2,5,7,\; 3,6]
 \end{align*}
 
 BFS from source vertex 0 at 250~MHz (\texttt{CLK\_PERIOD = 4~ns}).
@@ -30,7 +31,7 @@ Table~\ref{tab:sim_results} compares observed and expected BFS levels.
 \small
 \begin{tabular}{@{}ccrr@{}}
 \toprule
-Vertex & Expected Level & Observed Level & Discovery Time (cycles) \\
+Vertex & Exp.\ Level & Obs.\ Level & Discovery (cyc.) \\
 \midrule
 0 & 0 & 0 & $\sim$11 \\
 1 & 1 & 1 & $\sim$68 \\
