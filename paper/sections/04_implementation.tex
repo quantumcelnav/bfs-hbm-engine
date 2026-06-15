@@ -1,0 +1,117 @@
+\section{Implementation}
+\label{sec:impl}
+
+\subsection{Visited Bitmap: 2-Cycle BRAM RMW}
+
+The visited bitmap is the innermost structure in the BFS hot path. Every edge
+processed requires a bitmap check (read) for the destination vertex, and every
+newly discovered vertex requires a set (RMW).
+
+The module infers a single-port synchronous block RAM with a 2-stage pipeline:
+
+\textbf{Stage 0} (combinational address decode, registered): On \texttt{op\_valid}
+and \texttt{!busy}, latch the operation type (\texttt{op\_set}), the target vertex
+\texttt{op\_vid}, and the derived word address and bit select:
+\begin{equation}
+\mathit{waddr} = \mathit{op\_vid}[\mathit{VERTEX\_W}-1 : 5], \quad
+\mathit{bsel}  = \mathit{op\_vid}[4:0]
+\label{eq:bm_addr}
+\end{equation}
+Issue the BRAM read for \texttt{waddr} on the same edge.
+
+\textbf{Stage 1} (registered): The BRAM read data arrives. For a check operation,
+assert \texttt{chk\_valid} and drive \texttt{chk\_visited = rdata[bsel]}.
+For a set operation, write \texttt{rdata | (1 << bsel)} back to \texttt{waddr}
+and assert \texttt{set\_done}.
+
+The \texttt{busy} signal is simply \texttt{p1\_valid} — the in-flight flag.
+No new operation is accepted while a read is in the pipeline. This single-operation-at-a-time
+constraint is intentional: it eliminates read-after-write hazards without requiring
+a bypass network, at the cost of serializing bitmap accesses.
+
+\textbf{Memory footprint.} For \texttt{VERTEX\_W = 20} (1M vertices):
+\begin{align*}
+\mathit{BITMAP\_WORDS} &= \lceil 2^{20} / 32 \rceil = 32{,}768 \text{ words} \\
+                        &\Rightarrow 128~\text{KB}
+\end{align*}
+This fits in approximately 4 UltraScale+ RAMB36 primitives (4 $\times$ 36~Kb).
+
+\subsection{AXI4 Read Master}
+
+\texttt{axi4\_rd\_master} handles AXI4 protocol compliance, insulating
+\texttt{bfs\_ctrl} from the AR/R handshake details. It presents two simple interfaces
+to the controller:
+
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+\item \textbf{Request}: \texttt{(req\_valid, req\_ready, req\_addr, req\_len)} — a
+  simple valid/ready handshake with burst address and length.
+\item \textbf{Beat output}: \texttt{(beat\_valid, beat\_data, beat\_last, beat\_ready)}
+  — a streaming interface presenting each AXI R-channel beat to \texttt{bfs\_ctrl}.
+\end{itemize}
+
+The master drives all required AXI4 AR-channel signals to their required values:
+\texttt{arburst = INCR}, \texttt{arsize = 5'b00101} (32 bytes per beat for 256-bit
+bus), \texttt{arlock = 0}, \texttt{arcache = 4'b0011}, \texttt{arprot = 3'b010}.
+These are fixed for this use case; a more general implementation would expose them
+as parameters.
+
+\subsection{Frontier FIFO}
+
+\texttt{vertex\_fifo} is a synchronous first-in, first-out buffer with registered
+output. Each entry is $(\mathit{VERTEX\_W} + 16)$ bits wide, packing:
+
+\begin{equation}
+\mathit{entry} = \{\, \mathit{level}[15:0],\; \mathit{vid}[\mathit{VERTEX\_W}-1:0] \,\}
+\end{equation}
+
+Packing the level into the FIFO entry avoids a separate level tracking structure and
+preserves BFS ordering automatically: vertices enqueued at level $\ell$ will be
+dequeued before vertices at level $\ell+1$, because they were enqueued first.
+
+At \texttt{FIFO\_DEPTH = 2048} and \texttt{VERTEX\_W = 20}, the FIFO occupies
+$2048 \times 36 = 73{,}728$ bits $\approx$ 2 RAMB36 primitives on UltraScale+.
+The maximum frontier size before overflow is 2048 vertices. For high-degree
+power-law graphs where the frontier can explode rapidly, this depth may require
+tuning; the parameter is exposed for this reason.
+
+\subsection{Parameterization}
+
+Table~\ref{tab:params} lists the top-level parameters of \texttt{bfs\_top}.
+
+\begin{table}[h]
+\centering
+\caption{BFS-HBM top-level parameters.}
+\label{tab:params}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+Parameter & Default & Effect \\
+\midrule
+\texttt{VERTEX\_W}    & 20  & Graph vertex capacity: $2^{20}$ = 1M \\
+\texttt{AXI\_DATA\_W} & 256 & HBM bus width; sets \textit{VERTS\_PER\_BEAT} \\
+\texttt{AXI\_ADDR\_W} & 33  & HBM address space: 8~GB \\
+\texttt{AXI\_ID\_W}   & 4   & AXI4 ID width (16 IDs) \\
+\texttt{FIFO\_DEPTH}  & 2048 & Maximum frontier queue depth \\
+\texttt{ROW\_PTR\_BASE} & \texttt{33'h0} & HBM base for \texttt{row\_ptr} \\
+\texttt{COL\_IDX\_BASE} & \texttt{33'h0010\_0000} & HBM base for \texttt{col\_idx} (1~MB) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+For Yosys synthesis characterization, reduced parameters (\texttt{VERTEX\_W=6},
+\texttt{FIFO\_DEPTH=16}) replace BRAM inference with registers, allowing the
+synthesis tool to report gate count and logic depth without a PDK BRAM mapping pass.
+The production parameterization (\texttt{VERTEX\_W=20}, \texttt{FIFO\_DEPTH=2048})
+requires a BRAM memory macro pass (\texttt{memory\_bram} with a device-specific
+rules file in the Yosys flow, or Vivado's automatic inference for the FPGA target).
+
+\subsection{Reset and Initialization}
+
+All sequential state registers reset to zero on active-low \texttt{rst\_n}.
+The visited bitmap BRAM is initialized via an \texttt{initial} block that sets
+all words to zero. In Vivado, BRAM initialization is handled natively through
+\texttt{INIT} attributes on the RAMB36 primitive; in Yosys targeting Sky130 or
+other open PDKs, the \texttt{initial} block synthesizes to a reset-enable or
+is resolved by the place-and-route tool. A synchronous reset scan of the BRAM
+is not implemented in this baseline; for ASIC targets requiring hard reset,
+an additional 32K-cycle initialization FSM is the standard approach.

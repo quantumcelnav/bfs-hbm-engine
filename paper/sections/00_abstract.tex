@@ -1,0 +1,28 @@
+Graph traversal over large sparse datasets is a latency-critical primitive underlying
+financial fraud detection, graph databases, genomics assembly, and real-time recommendation.
+General-purpose processors fail this workload: CPU caches thrash on random pointer chains,
+and GPU kernel dispatch overhead precludes deterministic sub-microsecond response.
+A companion analysis~\cite{fritz2026rmwwall} establishes that graph BFS achieves only
+$\eta \approx 40\%$ bandwidth efficiency on HBM4 due to row-activation scheduling
+constraints, and that this gap is not closed by increasing data rate.
+
+We present \textit{BFS-HBM}: a fully open-source, synthesizable SystemVerilog
+microarchitecture for BFS traversal of CSR-encoded graphs stored in High-Bandwidth Memory.
+The design comprises a 12-state traversal FSM, an AXI4-compliant read master, a
+FIFO-based frontier queue, and a 2-cycle BRAM read-modify-write visited bitmap.
+Graph data is laid out in Compressed Sparse Row (CSR) format; a single 256-bit
+HBM beat delivers eight 32-bit neighbor IDs, and both endpoints of the CSR row pointer
+are fetched in one transaction, eliminating a second memory round trip per vertex.
+
+Cycle-accurate RTL simulation at a modeled HBM latency of 20 cycles verifies
+correct BFS discovery ordering and level assignment across all 8 vertices of an
+undirected test graph in 514 cycles at 250~MHz. Throughput analysis shows that
+the dominant bottleneck is the 2-cycle serial visited-bitmap RMW loop, which
+limits steady-state throughput to one edge per 2 cycles — consistent with the
+$\eta \approx 40\%$ bandwidth efficiency of the underlying HBM interface.
+
+The RTL is parameterized by vertex count ($2^{\mathit{VERTEX\_W}}$ vertices, default
+$2^{20} = 1\text{M}$), AXI data width, and FIFO depth, and targets Xilinx UltraScale+
+HBM devices (Alveo U280) for FPGA validation and TSMC N7 / GlobalFoundries 12LP for
+ASIC tapeout. All source, testbench, and synthesis scripts are released under the
+MIT license.

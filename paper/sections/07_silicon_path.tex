@@ -1,0 +1,89 @@
+\section{Path to Silicon}
+\label{sec:silicon}
+
+\subsection{FPGA Validation: Xilinx Alveo U280}
+
+The Xilinx Alveo U280 provides two HBM2e stacks (16 pseudo-channels each, 32
+pseudo-channels total, 8~GB total) connected to the FPGA fabric via 256-bit
+AXI4 slave ports. This makes it a near-direct FPGA target for BFS-HBM:
+the \texttt{bfs\_top} AXI4 read interface connects directly to the Vivado HBM IP
+without width conversion or protocol bridging.
+
+The FPGA bring-up sequence:
+\begin{enumerate}[leftmargin=*,itemsep=2pt]
+\item \textbf{Vivado project}: instantiate BFS-HBM IP and Xilinx HBM IP.
+  Connect \texttt{bfs\_top} AXI4 ports to HBM pseudo-channel 0.
+  Constrain clock to 250~MHz (HBM2e reference domain).
+\item \textbf{Graph loader}: TCL script to initialize HBM through the JTAG
+  debug hub, loading \texttt{row\_ptr} and \texttt{col\_idx} arrays from a
+  Python-generated binary file.
+\item \textbf{ILA instrumentation}: Xilinx Integrated Logic Analyzer probes on
+  \texttt{done}, \texttt{visited\_count}, \texttt{out\_valid}, and
+  \texttt{m\_axi\_arvalid} for real-time visibility without host-interface overhead.
+\item \textbf{Latency measurement}: capture the cycle delta between \texttt{start}
+  and \texttt{done} using ILA trigger/timestamp logic.
+\end{enumerate}
+
+Expected FPGA resource utilization for production parameters
+(\texttt{VERTEX\_W=20}, \texttt{FIFO\_DEPTH=2048}):
+
+\begin{table}[h]
+\centering
+\caption{Estimated Alveo U280 resource usage.}
+\label{tab:fpga_resources}
+\small
+\begin{tabular}{@{}lrl@{}}
+\toprule
+Resource & Count & Notes \\
+\midrule
+LUTs        & $\sim$2{,}000 & FSM, counters, AXI logic \\
+Flip-Flops  & $\sim$1{,}500 & State registers, beat buffer \\
+RAMB36      & 6             & 4 bitmap + 2 FIFO \\
+DSPs        & 0             & No multiply operations \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The small resource footprint allows up to $P \approx 200$ parallel BFS engines
+on a single U280, each targeting a different HBM pseudo-channel, before LUT
+capacity is saturated.
+
+\subsection{Multi-Engine Scaling}
+
+A single BFS engine achieves $\eta_\text{arch} \approx 40\%$ utilization at
+high graph degree, bounded by the serial RMW loop. Multiple independent engines
+sharing the HBM address space via a round-robin arbiter can approach peak HBM
+bandwidth utilization:
+
+\begin{equation}
+\mathit{Throughput}(P) = P \cdot \frac{1}{T_\text{RMW}} \cdot
+\min\!\left(1,\, \frac{\mathit{HBM\_BW}}{P \cdot \mathit{BW\_per\_engine}}\right)
+\end{equation}
+
+The HBM arbiter (\texttt{rtl/common/hbm\_arbiter.sv} in the companion
+\textit{graph-silicon} repository) implements round-robin scheduling of $N$
+engines across $M$ HBM pseudo-channels, with $M \leq N$ supported.
+
+\subsection{ASIC Target}
+
+The ASIC design targets TSMC N7 (7~nm) or GlobalFoundries 12LP (12~nm FinFET)
+for the logic die, with HBM2e or HBM4 stacked via silicon interposer.
+
+The tapeout path:
+\begin{enumerate}[leftmargin=*,itemsep=2pt]
+\item \textbf{Logic synthesis}: Cadence Genus targeting the chosen PDK.
+  Control logic ($<$10K gates at $P=1$) meets 1~GHz timing comfortably;
+  with $P=16$ engines, the HBM arbiter becomes the critical path.
+\item \textbf{Area estimate}: Yosys $\to$ Sky130 gives a reference gate count.
+  At N7 densities ($\sim$30~MTr/mm²) the BFS-HBM logic occupies $<$0.1~mm²
+  per engine; 16 engines plus HBM arbiter is $<$2~mm² of logic.
+\item \textbf{HBM PHY}: the die-to-die PHY for HBM2e is $\sim$40~mm² at 16nm;
+  this dominates die area and motivates use of a foundry-provided HBM PHY hard macro.
+\item \textbf{Tapeout vehicle}: Efabless Open MPW shuttle (Sky130, annual)
+  for the control logic standalone; MOSIS or direct foundry engagement for the
+  full HBM system.
+\end{enumerate}
+
+The FPGA PoC is the critical intermediate step: it validates real HBM latency
+numbers, exercises the AXI4 interface against a physical HBM controller, and
+produces the latency characterization data needed for the ASIC timing budget.

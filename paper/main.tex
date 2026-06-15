@@ -1,0 +1,73 @@
+\documentclass[10pt,twocolumn]{article}
+
+% ── Packages ──────────────────────────────────────────────────────────────────
+\usepackage[margin=0.75in,top=0.85in,bottom=0.85in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{cite}
+\usepackage{microtype}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{abstract}
+\usepackage{array}
+\usepackage{multirow}
+
+% ── Styling ───────────────────────────────────────────────────────────────────
+\hypersetup{colorlinks=true,linkcolor=blue!70!black,citecolor=blue!70!black,urlcolor=blue!70!black}
+\definecolor{codegray}{rgb}{0.4,0.4,0.4}
+\definecolor{codeblue}{rgb}{0.0,0.3,0.6}
+\lstset{
+  basicstyle=\ttfamily\scriptsize,
+  breaklines=true,
+  commentstyle=\color{codegray}\itshape,
+  keywordstyle=\color{codeblue},
+  numbers=left,
+  numberstyle=\tiny\color{codegray},
+  frame=single,
+  rulecolor=\color{codegray!30},
+  belowskip=4pt, aboveskip=4pt,
+}
+
+% ── Metadata ──────────────────────────────────────────────────────────────────
+\title{\textbf{BFS-HBM: Open-Source RTL for Deterministic\\
+       k-Hop Graph Traversal on High-Bandwidth Memory}}
+
+\author{
+  Justin A.\ Fritz \\
+  \textit{The Canonical Art LLC} \\
+  Fort Collins, CO, USA \\
+  \href{mailto:justin.fritz1@gmail.com}{justin.fritz1@gmail.com} \\[2pt]
+  \href{https://github.com/quantumcelnav/bfs-hbm-engine}%
+       {github.com/quantumcelnav/bfs-hbm-engine}
+}
+
+\date{June 2026 \quad (preprint)}
+
+% ── Document ──────────────────────────────────────────────────────────────────
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\input{sections/00_abstract}
+\end{abstract}
+
+\input{sections/01_introduction}
+\input{sections/02_background}
+\input{sections/03_architecture}
+\input{sections/04_implementation}
+\input{sections/05_analysis}
+\input{sections/06_results}
+\input{sections/07_silicon_path}
+\input{sections/08_conclusion}
+
+\bibliographystyle{ieeetr}
+\bibliography{refs}
+
+\end{document}

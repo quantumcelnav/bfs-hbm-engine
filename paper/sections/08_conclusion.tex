@@ -1,0 +1,46 @@
+\section{Conclusion}
+
+We have presented BFS-HBM: a fully synthesizable, open-source SystemVerilog
+microarchitecture for BFS traversal of CSR-encoded sparse graphs over
+High-Bandwidth Memory. The design is motivated by the observation that graph
+traversal achieves only $\eta \approx 40\%$ HBM bandwidth efficiency~\cite{fritz2026rmwwall},
+not from insufficient memory bandwidth, but from row-activation scheduling
+constraints intrinsic to DRAM timing. A purpose-built ASIC that co-designs the
+memory access pattern, the AXI4 burst strategy, and the on-chip frontier management
+can recover this efficiency and deliver deterministic sub-microsecond latency that
+no general-purpose processor can match.
+
+The key microarchitectural contributions are:
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+\item A single-beat CSR row-pointer fetch that recovers both $\mathit{row\_ptr}[v]$
+  and $\mathit{row\_ptr}[v+1]$ in one AXI4 transaction, eliminating a second HBM
+  round trip per vertex.
+\item An 8-neighbor beat buffer that amortizes HBM burst latency across 8 edge
+  checks per AXI transaction.
+\item A 2-cycle BRAM read-modify-write visited bitmap that uses 128~KB of on-chip
+  SRAM to track visited state for $2^{20}$ vertices, incurring no external memory
+  access for the bitmap.
+\item A closed-form throughput model connecting the RTL microarchitecture to the
+  JEDEC HBM4 timing efficiency result, showing convergence to $\eta \approx 40\%$
+  at realistic graph degrees.
+\end{itemize}
+
+Cycle-accurate simulation at 250~MHz with a 20-cycle modeled HBM latency confirms
+correct BFS ordering and level assignment for all vertices of the test graph in 514 cycles.
+
+The immediate next step is FPGA validation on a Xilinx Alveo U280, which provides
+HBM2e at the same AXI4 interface that BFS-HBM targets. Real HBM latency measurements
+on power-law graphs will validate the throughput model and provide the timing data
+needed to close the ASIC design budget.
+
+\vspace{6pt}
+\noindent\textbf{Open Source.}
+All RTL, testbenches, synthesis scripts, and simulation infrastructure are available at
+\url{https://github.com/quantumcelnav/bfs-hbm-engine} under the MIT license.
+The companion platform repository (\textit{graph-silicon}) provides workload-specific
+wrappers, an HBM arbiter for multi-engine configurations, and characterization
+harnesses for HFT, graph database, and genomics verticals.
+
+\vspace{6pt}
+\noindent\textbf{Acknowledgments.} The author thanks the JEDEC JC-42 working group
+for public access to the HBM2e and HBM4 specification documents.

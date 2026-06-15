@@ -1,0 +1,67 @@
+\section{Background}
+
+\subsection{Compressed Sparse Row Graph Representation}
+
+BFS-HBM stores graphs in Compressed Sparse Row (CSR) format, the standard
+representation for sparse adjacency matrices in high-performance graph systems.
+For a graph with $|V|$ vertices and $|E|$ edges, CSR requires two arrays:
+
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+\item \texttt{row\_ptr[0..|V|]}: a $(|V|+1)$-element array of 32-bit offsets.
+  \texttt{row\_ptr[v]} is the index in \texttt{col\_idx} of vertex $v$'s first
+  outgoing edge. The edge count for vertex $v$ is
+  \texttt{row\_ptr[v+1] - row\_ptr[v]}.
+\item \texttt{col\_idx[0..|E|-1]}: a $|E|$-element array of 32-bit vertex IDs,
+  storing destination vertices in adjacency-list order.
+\end{itemize}
+
+Memory footprint: $4(|V|+1) + 4|E|$ bytes. For a 1-million-vertex graph with
+average degree 10, this is $\approx$44~MB — well within a single HBM stack.
+
+\subsection{HBM Memory Interface}
+
+High-Bandwidth Memory achieves bandwidth through 3D die stacking and wide interfaces.
+BFS-HBM targets HBM2e (JESD235C) as deployed in Xilinx Alveo U280 and HBM4
+(JESD270-4A) as the forward-looking ASIC target.
+
+The key interface parameters relevant to graph traversal:
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+\item \textbf{Channel width}: 256 bits (32 bytes) per pseudo-channel.
+\item \textbf{Burst length}: BL=4 by default; a single beat delivers 256 bits.
+\item \textbf{Access latency}: $T_\text{access} \approx 20$~cycles at the logic
+  clock domain (250~MHz HBM2e, 500~MHz target for HBM4).
+\item \textbf{Bandwidth efficiency}: $\eta \approx 40$\% for random-access graph
+  workloads, dominated by the $t_\text{RRD,S}$ row-scheduling bottleneck~\cite{fritz2026rmwwall}.
+\end{itemize}
+
+The AXI4 protocol is the standard host interface for Xilinx HBM IP and for
+industry-standard HBM PHY controllers. BFS-HBM uses only the AXI4 read channels
+(AR + R), since graph traversal is a read-dominated workload: the visited bitmap
+write-back is handled on-chip.
+
+\subsection{AXI4 Read Channels}
+
+The AXI4 read channel consists of two sub-channels: the Address Read channel (AR)
+and the Read Data channel (R). A transaction is initiated by asserting
+\texttt{arvalid} with address (\texttt{araddr}), burst length (\texttt{arlen}),
+and burst type (\texttt{arburst = INCR}). The slave responds with \texttt{arready},
+then delivers \texttt{arlen+1} data beats on the R channel, each 256 bits wide,
+with \texttt{rlast} asserted on the final beat.
+
+BFS-HBM issues single-beat transactions for row-pointer fetches (\texttt{arlen=0})
+and multi-beat burst transactions for adjacency list fetches, sized to cover exactly
+$\lceil e/8 \rceil$ beats for a vertex with $e$ outgoing edges.
+
+\subsection{Prior Work}
+
+Graph processing on FPGAs has attracted significant research interest.
+Betkaoui et al.~\cite{betkaoui2012reconfigurable} demonstrated FPGA-accelerated BFS
+on Virtex-6 targeting DRAM; their throughput was limited by the narrow off-chip bus.
+Oguntebi and Olukotun~\cite{oguntebi2016graphops} proposed a collection of graph
+processing primitives targeting HMC; BFS-HBM targets the HBM interface that has
+since become the industry standard for bandwidth-critical accelerators.
+Yao et al.~\cite{yao2018efficient} demonstrated BFS on HBM-equipped FPGAs but
+did not characterize efficiency relative to the HBM timing model.
+To our knowledge, BFS-HBM is the first open-source RTL implementation that
+provides a closed-form throughput model connecting microarchitecture decisions to
+published HBM JEDEC timing parameters.

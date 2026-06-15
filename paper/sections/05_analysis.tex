@@ -1,0 +1,126 @@
+\section{Throughput Analysis}
+\label{sec:analysis}
+
+\subsection{Per-Vertex Processing Time}
+
+The total cycles to process vertex $v$ with degree $d_v$ is:
+\begin{equation}
+T(v) = T_\text{dequeue} + T_\text{ptr} + T_\text{edge}(d_v) + T_\text{scatter}(d_v)
+\label{eq:Tv}
+\end{equation}
+
+where the components are:
+
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+\item $T_\text{dequeue} \approx 2$ cycles: FIFO read handshake.
+\item $T_\text{ptr} = T_\text{access} + T_\text{fsmov} \approx 20 + 3 = 23$ cycles:
+  AXI4 round trip for row pointer fetch (1 beat) plus FSM state transitions
+  (\textsc{FetchPtr} $\to$ \textsc{WaitPtr} $\to$ \textsc{CheckEdges}).
+\item $T_\text{edge}(d_v) = \lceil d_v / 8 \rceil \cdot T_\text{access}$: AXI4 burst
+  for adjacency list. Each beat delivers 8 neighbor IDs; the burst issues once and
+  streams $\lceil d_v/8 \rceil$ beats back.
+\item $T_\text{scatter}(d_v) = d_v \cdot T_\text{RMW}$: bitmap check + optional set
+  per neighbor. $T_\text{RMW} = 2$ cycles (1 BRAM read pipeline stage + 1 evaluate).
+\end{itemize}
+
+\subsection{Steady-State Throughput}
+
+For graphs where the average degree $\bar{d}$ is large, the edge burst amortizes
+the AXI latency across many neighbors:
+
+\begin{equation}
+T_\text{edge}(\bar{d}) = \left\lceil \frac{\bar{d}}{8} \right\rceil \cdot T_\text{access}
+\approx \frac{\bar{d}}{8} \cdot T_\text{access}
+\quad \text{(for } \bar{d} \gg 8\text{)}
+\end{equation}
+
+Cycles per edge in steady state:
+\begin{equation}
+\frac{T(v)}{d_v} \approx
+\frac{T_\text{ptr}}{d_v}
++ \frac{T_\text{access}}{8}
++ T_\text{RMW}
+\label{eq:cpe}
+\end{equation}
+
+For $\bar{d} \gg T_\text{ptr}$ (high-degree hubs), the pointer fetch overhead
+vanishes and cycles-per-edge approaches:
+
+\begin{equation}
+\frac{T(v)}{d_v} \bigg|_{\bar{d} \to \infty}
+= \frac{T_\text{access}}{8} + T_\text{RMW}
+= \frac{20}{8} + 2 = 4.5 \text{ cycles/edge}
+\label{eq:cpe_limit}
+\end{equation}
+
+For the opposite extreme, low-degree vertices ($d_v = 1$):
+\begin{equation}
+T(v)\big|_{d_v=1} \approx 23 + 20 + 2 = 45 \text{ cycles/vertex}
+\label{eq:low_degree}
+\end{equation}
+
+\subsection{Connection to HBM Bandwidth Efficiency}
+
+The companion analysis~\cite{fritz2026rmwwall} shows that graph BFS achieves
+$\eta \approx 40\%$ HBM bandwidth efficiency on HBM4, dominated by the
+$t_\text{RRD,S}$ row-activation scheduling bottleneck with row-buffer hit rate
+$\lambda = 0.06$ for power-law graphs.
+
+This result has a direct microarchitectural interpretation in BFS-HBM.
+Consider the fraction of cycles spent on useful data transfer vs.\ total cycles:
+
+\begin{equation}
+\eta_\text{arch} = \frac{T_\text{RMW} \cdot \bar{d}}{T(v)}
+\approx \frac{2\bar{d}}{23 + \frac{T_\text{access}\bar{d}}{8} + 2\bar{d}}
+\label{eq:eta_arch}
+\end{equation}
+
+For $\bar{d} = 10$ (a typical web-scale power-law graph~\cite{leskovec2009community}):
+
+\begin{equation}
+\eta_\text{arch}(10) = \frac{20}{23 + 25 + 20} = \frac{20}{68} \approx 29\%
+\end{equation}
+
+The gap between $\eta_\text{arch} = 29\%$ and the system-level $\eta = 40\%$ reflects
+two effects operating in the same direction: the JEDEC timing model in~\cite{fritz2026rmwwall}
+characterizes \emph{bus utilization efficiency} (useful data bytes / total bytes transferred),
+while $\eta_\text{arch}$ measures \emph{compute utilization} (cycles doing RMW /
+total cycles). Both are limited by the irregular access pattern; the precise values
+depend on graph topology, HBM channel count, and operating clock.
+
+\subsection{The Single-Outstanding-Read Bottleneck}
+
+The most significant architectural constraint is that BFS-HBM issues one AXI4 read
+transaction at a time. The FSM cannot issue the adjacency list burst until the row
+pointer read completes, and it cannot begin the next vertex's row pointer read
+until the scatter loop for the current vertex completes.
+
+This serialization is not an accidental artifact of the current FSM design — it is
+a consequence of the data dependency chain in BFS:
+
+\begin{equation}
+\mathit{scatter}(v) \to \mathit{enqueue}(\text{neighbors}) \to \mathit{dequeue}(u)
+\to \mathit{fetch\_ptr}(u) \to \cdots
+\end{equation}
+
+The hop-$k$ frontier is logically unavailable until hop-$k-1$ is fully expanded.
+This is the same causal constraint that limits pipeline depth in any sequentially
+dependent computation.
+
+Breaking this constraint requires either:
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+\item \textbf{Multiple parallel traversal engines}: $P$ independent
+  \texttt{bfs\_ctrl} instances sharing the HBM arbiter, each processing a
+  different frontier vertex simultaneously. Throughput scales as $P$ for
+  non-overlapping frontiers; an arbiter prevents channel conflicts.
+\item \textbf{Direction-optimizing BFS}~\cite{beamer2012direction}: switch from
+  top-down (expand frontier) to bottom-up (check all unvisited vertices against frontier)
+  when the frontier becomes large. Reduces pointer-chasing for high-diameter graphs.
+\item \textbf{Prefetch buffering}: issue the next vertex's row pointer read
+  concurrently with the scatter loop of the current vertex, using a 1-deep
+  prefetch register. This requires tracking the next frontier head speculatively
+  and is left as an extension.
+\end{itemize}
+
+Section~\ref{sec:silicon} discusses multi-engine parallelism as the primary
+throughput scaling mechanism for the ASIC design.

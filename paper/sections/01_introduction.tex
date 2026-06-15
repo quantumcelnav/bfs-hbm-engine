@@ -1,0 +1,105 @@
+\section{Introduction}
+
+A wide class of latency-critical industrial problems reduces to the same computational
+primitive: given a large sparse graph $G = (V, E)$ stored in memory and a source
+vertex $s$, find all vertices reachable within $k$ hops and the shortest-hop distance
+to each. This primitive underlies:
+
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+\item \textbf{Financial fraud and risk detection}: identify transaction ring-members,
+  card-sharing clusters, and account compromise chains in real time~\cite{akoglu2015graph}.
+\item \textbf{Graph databases}: answer neighborhood queries, path existence tests,
+  and reachability checks over entity-relationship graphs~\cite{besta2019demystifying}.
+\item \textbf{Genomics}: traverse de Bruijn assembly graphs for contig construction
+  in DNA sequencing pipelines~\cite{pevzner2001eulerian}.
+\item \textbf{Recommendation}: multi-hop collaborative filtering over user-item bipartite
+  graphs~\cite{ying2018graph}.
+\end{itemize}
+
+Each vertical demands different performance contracts, but all share the same memory
+access signature: highly irregular, pointer-chasing reads that defeat CPU caches and
+GPU batch pipelines alike. A k=3 BFS over a 1-million-vertex power-law graph requires
+visiting $O(10^4$--$10^5)$ distinct vertices, each residing at a random location in a
+tens-of-gigabyte memory space. The row-buffer hit rate $\lambda$ for such access
+patterns is below 0.10, compared to 0.88 for regular stencil codes~\cite{fritz2026rmwwall}.
+
+\subsection{The Hardware Gap}
+
+Table~\ref{tab:competitive} summarizes the latency and power landscape for k=3 BFS
+on a 1-million-vertex graph.
+
+\begin{table}[h]
+\centering
+\caption{Competitive landscape: k=3 BFS, 1M vertices.}
+\label{tab:competitive}
+\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Platform           & Latency        & Power \\
+\midrule
+CPU (server, LLC)  & 50--500~$\mu$s & $\sim$200~W \\
+GPU (A100, HBM2e)  & 10--50~$\mu$s  & $\sim$400~W \\
+FPGA (Alveo U280)  & 2--10~$\mu$s   & $\sim$75~W  \\
+\textbf{Target ASIC} & \textbf{0.5--2~$\mu$s} & \textbf{$\sim$5~W} \\
+\bottomrule
+\end{tabular}
+\vspace{3pt}
+\begin{minipage}{\linewidth}
+\footnotesize\textit{CPU latency estimated from Graph500 published runs on server
+hardware~\cite{graph500}. GPU from Merrill et al.\ scalable BFS on A100~\cite{merrill2012scalable},
+adjusted for kernel launch overhead. FPGA from Betkaoui et al.~\cite{betkaoui2012reconfigurable}
+and Oguntebi and Olukotun~\cite{oguntebi2016graphops}, scaled to HBM2e bandwidth.
+ASIC is a pre-silicon design target.}
+\end{minipage}
+\end{table}
+
+CPU performance is limited by cache miss chains: on a random graph, a 3-hop traversal
+incurs $O(D_\text{avg}^k)$ LLC misses, each paying DRAM round-trip latency.
+GPU performance is limited by kernel dispatch overhead ($\sim$5~$\mu$s minimum) and the
+requirement to batch queries for effective SM utilization.
+Neither platform provides deterministic tail latency, which is required for real-time
+fraud scoring and HFT risk systems.
+
+A purpose-built ASIC eliminates both penalties. Fixed-function hardware can stream CSR
+adjacency data from HBM with no dispatch overhead, pipelining read requests to maximize
+bus utilization, and providing hard real-time guarantees on traversal latency.
+
+\subsection{A Cybernetic Framing}
+
+The BFS traversal loop is a cybernetic system in Wiener's sense~\cite{wiener1948cybernetics}:
+a feedback control loop that uses information received from the environment (HBM adjacency
+lists) to update system state (the visited bitmap) and direct future action (the frontier
+queue). The $\eta \approx 40\%$ efficiency bound established in~\cite{fritz2026rmwwall}
+quantifies the communication rate between system and environment; it is the rate at which
+the system can reduce uncertainty about the reachable subgraph. Custom silicon improves
+this not by widening the channel, but by reducing control loop overhead --- the cycles
+spent on protocol rather than information.
+
+This framing matters beyond the immediate architecture. Mapping problems onto the
+available technology is one step in a longer journey. The deeper question is what
+becomes possible when the control loop closes fast enough that the machine's behavior
+becomes indistinguishable from purpose. BFS-HBM is an existence proof at the memory
+interface level. The same principle scales: as loop closure time falls, the class of
+problems that can be solved in real time expands. The ASIC is not the end of the
+road --- it is a measurement of where the road is now.
+
+\subsection{Contributions}
+
+This paper presents BFS-HBM, a fully synthesizable open-source RTL implementation of
+the BFS traversal primitive for HBM-attached graphs:
+
+\begin{enumerate}[leftmargin=*,itemsep=2pt]
+\item A 12-state AXI4 traversal FSM (\texttt{bfs\_ctrl}) that exploits CSR memory
+  layout to fetch both row-pointer endpoints in a single HBM transaction.
+\item A 2-cycle BRAM read-modify-write visited bitmap (\texttt{visited\_bitmap})
+  that tracks visited state for up to $2^{20}$ vertices in 128~KB of on-chip SRAM.
+\item A cycle-accurate verification of correct BFS ordering against a golden reference,
+  with a modeled HBM latency of 20 cycles at 250~MHz.
+\item A closed-form throughput model connecting the RTL microarchitecture directly
+  to the $\eta \approx 40\%$ HBM efficiency result of the companion bandwidth analysis.
+\item A clear path from this RTL baseline to FPGA validation on Xilinx Alveo U280
+  and ASIC tapeout on TSMC N7 or GlobalFoundries 12LP.
+\end{enumerate}
+
+All RTL, testbenches, and synthesis scripts are available at
+\url{https://github.com/quantumcelnav/bfs-hbm-engine} under the MIT license.
